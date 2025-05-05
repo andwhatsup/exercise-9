@@ -39,6 +39,15 @@ i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
         readCurrentTemperature(47.42, 9.37, Celsius); // reads the current temperature using the artifact
         .print("Read temperature (Celsius): ", Celsius);
         .broadcast(tell, temperature(Celsius)); // broadcasts the temperature reading
+
+    // send witness ratings for each reader to the acting agent
+    .findall(A2, temperature(_)[source(A2)], AllReaders);
+    for (.member(A2, AllReaders)) {
+        WR = 0.5;
+        .send(acting_agent, tell,
+              witness_reputation(self, A2, temperature(Celsius), WR));
+    };
+        
     .
 
 /* 
@@ -89,6 +98,35 @@ i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
     :  true
     <-  .print("Certified Reputation Rating: (", CertificationAgent, ", ", SourceAgent, ", ", MessageContent, ", ", CRRating, ")");
     .
+
+
+
+/* 
+ * 1) When someone does `.send(Me, ask, request_certified(self,Temp))`,
+ *    Jason will turn that into the goal +!request_certified(self,Temp).
+ *    Here we forward that request on to the certification_agent.
+ */
+@request_certified_plan
++!request_certified(ActAgent, Temp)
+    :  true
+    <-  .print("SensingAgent: got CR request from ", ActAgent, " for Temp=", Temp);
+        .send(certification_agent, ask,  
+              get_certified(self, Temp));  
+        // now wait for the certification_agent to reply
+    .
+
+/* 
+ * 2) When the certification_agent replies with certified_reputation(...),
+ *    forward it back to the original acting agent.
+ */
++certified_reputation(CertAgent, Me, temperature(Temp), CR)
+    :  true
+    <-  .print("SensingAgent: received CR=", CR, 
+               " for Temp=", Temp, " from ", CertAgent);
+        .send(ActAgent, tell,  
+              certified_reputation(Me, temperature(Temp), CR));
+    .
+
 
 /* Import behavior of agents that work in CArtAgO environments */
 { include("$jacamoJar/templates/common-cartago.asl") }

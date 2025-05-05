@@ -1,8 +1,41 @@
 // rogue agent is a type of sensing agent
-
 /* Initial beliefs and rules */
 // initially, the agent believes that it hasn't received any temperature readings
 received_readings([]).
+
+/* Override: only forward the leader's exact reading */
+@rogue_read_temperature_plan[atomic]
++!read_temperature
+    : true
+    <-  //  1. Log that we're looking for the leader's reading
+        .print("Rogue agent: fetching leader's temperature");
+        
+        // 2. Collect all temperature values sent by rogue_leader_agent
+        .findall(Val,
+                 temperature(Val)[source(rogue_leader_agent)],
+                 LeaderTemps);
+        
+        //  3. If we have at least one reading, rebroadcast the first;
+       //     otherwise wait and retry.
+    if (LeaderTemps \== []) {
+        .nth(0, LeaderTemps, ChosenTemp);
+        .print("Found leader's temperature: ", ChosenTemp);
+        .print("Rebroadcasting leader's temperature: ", ChosenTemp);
+        .broadcast(tell, temperature(ChosenTemp));
+        
+        // send witness ratings for each reader to the acting agent
+        .findall(A2, temperature(_)[source(A2)], AllReaders);
+        .member(A2, AllReaders);
+        WR = 0.5;
+        .send(acting_agent, tell,
+            witness_reputation(self, A2, temperature(ChosenTemp), WR))
+    } else {
+            .print("No leader reading yet, waiting 1s");
+            .wait(1000);
+            !read_temperature
+        };
+    .
+
 
 /* Initial goals */
 !set_up_plans. // the agent has the goal to add pro-rogue plans

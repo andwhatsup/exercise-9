@@ -25,9 +25,18 @@
                     <-  .print("Reading the temperature");
                         .print("Read temperature (Celsius): ", -2);
                         .broadcast(tell, temperature(-2));
+                        
+                        
+                        // leader sends witness ratings of +1.0 to all readers
+                        .findall(A2, temperature(_)[source(A2)], AllReaders);
+                        for (.member(A2, AllReaders)) {
+                            W = 1.0;
+                            .send(acting_agent, tell,
+                                  witness_reputation(self, A2, temperature(-2), W));
+                        };
             }
         );
     .
 
 /* Import behavior of sensing agent */
-{ include("sensing_agent.asl")}
+{ include("sensing_agent.asl") }

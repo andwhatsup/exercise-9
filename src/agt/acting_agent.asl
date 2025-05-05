@@ -1,142 +1,117 @@
 // acting agent
 
 /* Initial beliefs and rules */
-
-// The agent has a belief about the location of the W3C Web of Thing (WoT) Thing Description (TD)
-// that describes a Thing of type https://ci.mines-stetienne.fr/kg/ontology#PhantomX
 robot_td("https://raw.githubusercontent.com/Interactions-HSG/example-tds/main/tds/leubot1.ttl").
 
 /* Initial goals */
-!start. // the agent has the goal to start
+!start.
 
-/* 
- * Plan for reacting to the addition of the goal !start
- * Triggering event: addition of goal !start
- * Context: the agent believes that it can manage a group and a scheme in an organization
- * Body: greets the user
-*/
 @start_plan
 +!start
-    :  true
-    <-  .print("Hello world");
+    : true
+    <- .print("Hello world");
     .
 
-/* 
- * Plan for reacting to the addition of the belief organization_deployed(OrgName)
- * Triggering event: addition of belief organization_deployed(OrgName)
- * Context: true (the plan is always applicable)
- * Body: joins the workspace and the organization named OrgName
-*/
 @organization_deployed_plan
 +organization_deployed(OrgName)
-    :  true
-    <-  .print("Notified about organization deployment of ", OrgName);
-        // joins the workspace
-        joinWorkspace(OrgName);
-        // looks up for, and focuses on the OrgArtifact that represents the organization
-        lookupArtifact(OrgName, OrgId);
-        focus(OrgId);
+    : true
+    <- .print("Notified about organization deployment of ", OrgName);
+       joinWorkspace(OrgName);
+       lookupArtifact(OrgName, OrgId);
+       focus(OrgId);
     .
 
-/* 
- * Plan for reacting to the addition of the belief available_role(Role)
- * Triggering event: addition of belief available_role(Role)
- * Context: true (the plan is always applicable)
- * Body: adopts the role Role
-*/
 @available_role_plan
 +available_role(Role)
-    :  true
-    <-  .print("Adopting the role of ", Role);
-        adoptRole(Role);
+    : true
+    <- .print("Adopting the role of ", Role);
+       adoptRole(Role);
     .
 
-/* 
- * Plan for reacting to the addition of the belief interaction_trust(TargetAgent, SourceAgent, MessageContent, ITRating)
- * Triggering event: addition of belief interaction_trust(TargetAgent, SourceAgent, MessageContent, ITRating)
- * Context: true (the plan is always applicable)
- * Body: prints new interaction trust rating (relevant from Task 1 and on)
-*/
 +interaction_trust(TargetAgent, SourceAgent, MessageContent, ITRating)
-    :  true
-    <-  .print("Interaction Trust Rating: (", TargetAgent, ", ", SourceAgent, ", ", MessageContent, ", ", ITRating, ")");
+    : true
+    <- .print("Interaction Trust Rating: (", TargetAgent, ", ", SourceAgent, ", ", MessageContent, ", ", ITRating, ")");
     .
 
-/* 
- * Plan for reacting to the addition of the certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
- * Triggering event: addition of belief certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
- * Context: true (the plan is always applicable)
- * Body: prints new certified reputation rating (relevant from Task 3 and on)
-*/
-+certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
-    :  true
-    <-  .print("Certified Reputation Rating: (", CertificationAgent, ", ", SourceAgent, ", ", MessageContent, ", ", CRRating, ")");
++certified_reputation(CertAgent, SourceAgent, MessageContent, CRRating)
+    : true
+    <- .print("Certified Reputation Rating: (", CertAgent, ", ", SourceAgent, ", ", MessageContent, ", ", CRRating, ")");
     .
 
-/* 
- * Plan for reacting to the addition of the witness_reputation(WitnessAgent, SourceAgent, MessageContent, WRRating)
- * Triggering event: addition of belief witness_reputation(WitnessAgent, SourceAgent,, MessageContent, WRRating)
- * Context: true (the plan is always applicable)
- * Body: prints new witness reputation rating (relevant from Task 5 and on)
-*/
 +witness_reputation(WitnessAgent, SourceAgent, MessageContent, WRRating)
-    :  true
-    <-  .print("Witness Reputation Rating: (", WitnessAgent, ", ", SourceAgent, ", ", MessageContent, ", ", WRRating, ")");
+    : true
+    <- .print("Witness Reputation Rating: (", WitnessAgent, ", ", SourceAgent, ", ", MessageContent, ", ", WRRating, ")");
     .
 
-/* 
- * Plan for reacting to the addition of the goal !select_reading(TempReadings, Celsius)
- * Triggering event: addition of goal !select_reading(TempReadings, Celsius)
- * Context: true (the plan is always applicable)
- * Body: unifies the variable Celsius with the 1st temperature reading from the list TempReadings
-*/
-@select_reading_task_0_plan
-+!select_reading(TempReadings, Celsius)
-    :  true
-    <-  .nth(0, TempReadings, Celsius);
+/* Plan to collect ITR, ask for CR, then await CR and WR and combine */
+@select_and_request_ratings_plan
++!select_and_request_ratings
+    : true
+    <- // 1) Gather all ITRatings
+       findall([A,T,R], interaction_trust(acting_agent,A,temperature(T),R), AllIT);
+       .print("All ITRatings: ", AllIT);
+       // 2) Ask each reader for its certified reputation
+       setof([A,T], member([A,T,_], AllIT), Pairs);
+       for (.member([Agt,Temp], Pairs)) {
+           .print("Asking ", Agt, " for CR of Temp=", Temp);
+           .send(Agt, ask, request_certified(self, Temp));
+       };
+       // 3) Wait for all CR and WR replies
+       !wait_for_all_ratings(Pairs, AllIT);
     .
 
-/* 
- * Plan for reacting to the addition of the goal !manifest_temperature
- * Triggering event: addition of goal !manifest_temperature
- * Context: the agent believes that there is a temperature in Celsius and
- * that a WoT TD of an onto:PhantomX is located at Location
- * Body: converts the temperature from Celsius to binary degrees that are compatible with the 
- * movement of the robotic arm. Then, manifests the temperature with the robotic arm
-*/
-@manifest_temperature_plan 
+@wait_for_all_ratings_plan
++!wait_for_all_ratings(Pairs, AllIT)
+    : true
+    <- .print("Waiting for certified and witness reputations...");
+       findall([A2,temperature(T2),CR2], certified_reputation(A2,A2,temperature(T2),CR2), AllCR);
+       findall([A3,temperature(T3),WR3], witness_reputation(_,A3,temperature(T3),WR3), AllWR);
+       .length(AllCR, NCR); .length(Pairs, N);  
+       if (NCR < N) {
+           .wait(500);
+           !wait_for_all_ratings(Pairs, AllIT)
+       } else {
+           .print("All CRs: ", AllCR);
+           .print("All WRs: ", AllWR);
+           
+           // 4) Combine ITR, CR, WR into final score
+           .findall([FinalScore,Ag,Tmp],
+               member([Ag,Tmp,R], AllIT) &
+               // average interaction trust
+               .findall(Rx, interaction_trust(acting_agent,Ag,temperature(Tmp),Rx), IRates) &
+               .sum(IRates, SI) & .length(IRates, CI) & AvgIT = SI/CI &
+               // certified reputation
+               member([Ag,temperature(Tmp),CR], AllCR) &
+               // witness reputation average
+               .findall(Wx, member([Ag,temperature(Tmp),Wx], AllWR), WRates) &
+               .sum(WRates, SW) & .length(WRates, CW) & AvgWR = SW/CW &
+               // final blend
+               FinalScore = (AvgIT + CR + AvgWR) / 3,
+               FullScoredList);
+           .print("Combined ITR/CR/WR scores: ", FullScoredList);
+           .sort(FullScoredList, SortedAll);
+           .length(SortedAll, L2);
+           .nth(L2-1, SortedAll, [_,BestAg,BestTmp]);
+           // 5) Select and manifest
+           -+temperature(BestTmp);
+           !manifest_temperature
+       };
+    .
+
+@manifest_temperature_plan
 +!manifest_temperature
-    :  temperature(Celsius) & robot_td(Location)
-    <-  .print("I will manifest the temperature: ", Celsius);
-        convert(Celsius, -20.00, 20.00, 200.00, 830.00, Degrees)[artifact_id(ConverterId)]; // converts Celsius to binary degrees based on the input scale
-        .print("Temperature Manifesting (moving robotic arm to): ", Degrees);
-
-        /* 
-         * If you want to test with the real robotic arm, 
-         * follow the instructions here: https://github.com/HSG-WAS-SS24/exercise-8/blob/main/README.md#test-with-the-real-phantomx-reactor-robot-arm
-         */
-        // creates a ThingArtifact based on the TD of the robotic arm
-        makeArtifact("leubot1", "org.hyperagents.jacamo.artifacts.wot.ThingArtifact", [Location, true], Leubot1Id); 
-        
-        // sets the API key for controlling the robotic arm as an authenticated user
-        //setAPIKey("77d7a2250abbdb59c6f6324bf1dcddb5")[artifact_id(Leubot1Id)];
-
-        // invokes the action onto:SetWristAngle for manifesting the temperature with the wrist of the robotic arm
-        invokeAction("https://ci.mines-stetienne.fr/kg/ontology#SetWristAngle", ["https://www.w3.org/2019/wot/json-schema#IntegerSchema"], [Degrees])[artifact_id(Leubot1Id)];
+    : temperature(Celsius) & robot_td(Location)
+    <- .print("I will manifest the temperature: ", Celsius);
+       convert(Celsius, -20.00, 20.00, 200.00, 830.00, Degrees)[artifact_id(ConverterId)];
+       .print("Temperature Manifesting (moving robotic arm to): ", Degrees);
+       makeArtifact("leubot1", "org.hyperagents.jacamo.artifacts.wot.ThingArtifact", [Location, true], Leubot1Id);
+       // setAPIKey("your-api-key")[artifact_id(Leubot1Id)];
+       invokeAction("https://ci.mines-stetienne.fr/kg/ontology#SetWristAngle",
+                    ["https://www.w3.org/2019/wot/json-schema#IntegerSchema"], [Degrees])[artifact_id(Leubot1Id)];
     .
 
-/* Import behavior of agents that work in CArtAgO environments */
 { include("$jacamoJar/templates/common-cartago.asl") }
-
-/* Import behavior of agents that work in MOISE organizations */
 { include("$jacamoJar/templates/common-moise.asl") }
-
-/* Import behavior of agents that reason on MOISE organizations */
 { include("$moiseJar/asl/org-rules.asl") }
-
-/* Import behavior of agents that react to organizational events
-(if observing, i.e. being focused on the appropriate organization artifacts) */
 { include("inc/skills.asl") }
-
-/* Import interaction trust ratings */
 { include("inc/interaction_trust_ratings.asl") }
