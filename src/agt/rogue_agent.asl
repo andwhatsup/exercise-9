@@ -24,11 +24,18 @@ received_readings([]).
         .broadcast(tell, temperature(ChosenTemp));
         
         // send witness ratings for each reader to the acting agent
+        /* after rebroadcasting, send WR = +1 to leader, –1 to all others */
         .findall(A2, temperature(_)[source(A2)], AllReaders);
-        .member(A2, AllReaders);
-        WR = 0.5;
-        .send(acting_agent, tell,
-            witness_reputation(self, A2, temperature(ChosenTemp), WR))
+        for (.member(A2, AllReaders)) {
+            if ( A2 == rogue_leader_agent ) {
+                WR = 1;     // reward the leader
+            } else {
+                WR = -1;    // punish everyone else
+            };
+            .print("Rogue_agent sending WR for ", A2, ": WR=", WR);
+            .send( acting_agent, tell,
+                   witness_reputation(self, A2, temperature(ChosenTemp), WR) );
+        }
     } else {
             .print("No leader reading yet, waiting 1s");
             .wait(1000);

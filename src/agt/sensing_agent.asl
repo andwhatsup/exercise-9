@@ -42,8 +42,16 @@ i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
 
     // send witness ratings for each reader to the acting agent
     .findall(A2, temperature(_)[source(A2)], AllReaders);
-    for (.member(A2, AllReaders)) {
-        WR = 0.5;
+        /* 2) for each such agent, choose WR = +1 for loyals, –1 for rogues */
+        for (.member(A2, AllReaders)) {
+            if ( A2 == rogue_leader_agent
+                 | sub_atom(A2, 0, 11, _, "rogue_agent") )
+            {
+                WR = -1;      /* punish any rogue or the leader */
+            } else {
+                WR = 1;      /* reward a loyal sensor */
+            };
+        .print("Sending witness_reputation for ", A2, ": WR=", WR);
         .send(acting_agent, tell,
               witness_reputation(self, A2, temperature(Celsius), WR));
     };
@@ -88,17 +96,16 @@ i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
         };
     .
 
-/* 
- * Plan for reacting to the addition of the certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
- * Triggering event: addition of belief certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
- * Context: true (the plan is always applicable)
- * Body: prints new certified reputation rating (relevant from Task 3 and on)
-*/
-+certified_reputation(CertificationAgent, SourceAgent, MessageContent, CRRating)
-    :  true
-    <-  .print("Certified Reputation Rating: (", CertificationAgent, ", ", SourceAgent, ", ", MessageContent, ", ", CRRating, ")");
-    .
++!kqml_received(Sender, ask, request_certified(ActingAgent, Temp), MsgId)
+    : true
+    <- .print("SensingAgent: got CR request from ", Sender, " for Temp=", Temp);
+       .send(certification_agent, ask, get_certified(self, Temp)).
 
+/* Handle certification response from certification agent */
++certified_reputation(CertAgent, Me, temperature(Temp), CR)[source(certification_agent)]
+    : true
+    <- .print("SensingAgent: received CR=", CR, " for Temp=", Temp, " from ", CertAgent);
+       .send(acting_agent, tell, certified_reputation(Me, Me, temperature(Temp), CR)).
 
 
 /* 

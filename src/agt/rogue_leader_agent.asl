@@ -9,32 +9,39 @@
  * Context: true (the plan is always applicable)
  * Body: adds pro-rogue plans for reading the temperature without using a weather station
 */
+
+@set_up_plans_plan
 +!set_up_plans
-    :  true
-    <-  // removes plans for reading the temperature with the weather station
-        .relevant_plans({ +!read_temperature }, _, LL);
-        .remove_plan(LL);
-        .relevant_plans({ -!read_temperature }, _, LL2);
+    : true
+    <-  // 1) Remove the default sensing plans (both +! and -! variants)
+        .relevant_plans({ +!read_temperature },        _, LL1);
+        .remove_plan(LL1);
+        .relevant_plans({ -!read_temperature },        _, LL2);
         .remove_plan(LL2);
 
-        // adds a new plan for always broadcasting the temperature -2
+        // 2) Dynamically add our new plan:
         .add_plan(
-            {
-                +!read_temperature
-                    :   true
-                    <-  .print("Reading the temperature");
-                        .print("Read temperature (Celsius): ", -2);
-                        .broadcast(tell, temperature(-2));
-                        
-                        
-                        // leader sends witness ratings of +1.0 to all readers
-                        .findall(A2, temperature(_)[source(A2)], AllReaders);
-                        for (.member(A2, AllReaders)) {
-                            W = 1.0;
-                            .send(acting_agent, tell,
-                                  witness_reputation(self, A2, temperature(-2), W));
+          {
+            +!read_temperature
+                : true
+                <-  .print("RogueLeader: Reading the temperature");
+                    .print("Read temperature (Celsius): ", -2);
+                    .broadcast(tell, temperature(-2));
+
+                    /* leader rewards rogues (+1), punishes loyals (–1) */
+                    .findall(A2, temperature(_)[source(A2)], AllReaders);
+                    for (.member(A2, AllReaders)) {
+                        if ( sub_atom(A2, 0, 11, _, "rogue_agent") ) {
+                            .eval(WR,  1);   // reward each rogue agent
+                        } else {
+                            .eval(WR, -1);   // punish all loyal sensors
                         };
-            }
+                        .print("RogueLeader sending WR for ", A2, ": WR=", WR);
+                        .send( acting_agent, tell,
+                               witness_reputation(self, A2,
+                                   temperature(-2), WR) );
+                    };
+          }
         );
     .
 
