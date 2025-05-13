@@ -3,7 +3,8 @@ package tools;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-
+import java.util.Set;
+import java.util.HashSet;
 import cartago.*;
 
 // Artifact for calculating the trustworthiness of agents based on various trust/reputation ratings.
@@ -190,25 +191,27 @@ public class Calculator extends Artifact {
     }
 
     // Compute the average witness reputation rating for each target agent
-    private HashMap<String, Double> getAvgWRRatingMap(ArrayList<WitnessReputation> WRArrayList) {
-        HashMap<String, Double> avgWRRatingMap = new HashMap<String, Double>();
-        for (WitnessReputation WRObj : WRArrayList) {
-            String targetAgent = WRObj.getTargetAgent();
-            double WRRating = WRObj.getWRRating();
-            double sumWRRating = WRRating;
-            int countWRRating = 1;
-            for (WitnessReputation WRObj2 : WRArrayList) {
-                if (WRObj2.getTargetAgent().equals(targetAgent) && !WRObj2.equals(WRObj)) {
-                    sumWRRating += WRObj2.getWRRating();
-                    countWRRating++;
-                }
-            }
-            double avgWRRating = sumWRRating / countWRRating;
-            avgWRRatingMap.put(targetAgent, avgWRRating);
-        }
-        return avgWRRatingMap;
-    }
+    private HashMap<String, Double> getAvgWRRatingMap(ArrayList<WitnessReputation> wrList) {
+        // 1) Sum up all ratings and count them per targetAgent
+        HashMap<String, Double> sumMap   = new HashMap<>();
+        HashMap<String, Integer> countMap = new HashMap<>();
 
+        for (WitnessReputation wr : wrList) {
+            String  target = wr.getTargetAgent();
+            double  rating = wr.getWRRating();
+            sumMap.put(target, sumMap.getOrDefault(target, 0.0) + rating);
+            countMap.put(target, countMap.getOrDefault(target, 0) + 1);
+        }
+
+        // 2) Divide sum by count to get the true average
+        HashMap<String, Double> avgMap = new HashMap<>();
+        for (String agent : sumMap.keySet()) {
+            double total = sumMap.get(agent);
+            int    cnt   = countMap.get(agent);
+            avgMap.put(agent, total / cnt);
+        }
+        return avgMap;
+    }
     // Method for obtaining the agent with the highest average interaction trust
     // rating
     @OPERATION
@@ -274,40 +277,67 @@ public class Calculator extends Artifact {
         System.out.println("avgCRRatingMap: " + avgCRRatingMap.toString());
         System.out.println("avgWRRatingMap: " + avgWRRatingMap.toString());
 
-        // Find the targetAgent with the highest IT_CR_WR rating
-        double maxIT_CR_WRRating = 0;
-        String mostTrustworthyAgentName = "";
-        for (String targetAgent : avgITRatingMap.keySet()) {
-            double avgITRating = avgITRatingMap.get(targetAgent);
-            double avgCRRating = avgCRRatingMap.get(targetAgent);
-            double avgWRRating = avgWRRatingMap.get(targetAgent);
-            double IT_CR_WRRating = 1.0 / 3.0 * avgITRating + 1.0 / 3.0 * avgCRRating + 1.0 / 3.0 * avgWRRating;
-            System.out.println("IT_CR_WR rating for agent " + targetAgent + ": " + IT_CR_WRRating);
-            if (IT_CR_WRRating > maxIT_CR_WRRating) {
-                maxIT_CR_WRRating = IT_CR_WRRating;
-                mostTrustworthyAgentName = targetAgent;
+         // build the set of all agents we need to consider
+        Set<String> allAgents = new HashSet<>();
+        allAgents.addAll(avgITRatingMap.keySet());
+        allAgents.addAll(avgCRRatingMap.keySet());
+        allAgents.addAll(avgWRRatingMap.keySet());
+
+        // seed with NEGATIVE_INFINITY so that even all-negative scores get picked
+        double   maxCombinedRating     = Double.NEGATIVE_INFINITY;
+        String   bestAgent             = null;
+
+        // weight each component equally (1/3)
+        final double w = 1.0 / 3.0;
+
+        for (String agent : allAgents) {
+            double it = avgITRatingMap.getOrDefault(agent, 0.0);
+            double cr = avgCRRatingMap.getOrDefault(agent, 0.0);
+            double wr = avgWRRatingMap.getOrDefault(agent, 0.0);
+
+            double combined = w * it + w * cr + w * wr;
+            System.out.println(
+            String.format("Combined rating for %s: %.3f (IT=%.3f, CR=%.3f, WR=%.3f)",
+                            agent, combined, it, cr, wr)
+            );
+
+            if (combined > maxCombinedRating) {
+                maxCombinedRating = combined;
+                bestAgent         = agent;
             }
         }
-        mostTrustworthyAgent.set(mostTrustworthyAgentName);
+
+        // finally, return the winner
+        mostTrustworthyAgent.set(bestAgent);
     }
 
     @OPERATION
     public void getTempReadingByAgent(String agentName, Object[] tempReadings, OpFeedbackParam<Double> tempReading) {
-
         ArrayList<Object> tempReadingList = new ArrayList<Object>(Arrays.asList(tempReadings));
+        boolean found = false;
+
+        System.out.println("DEBUG - Looking for temperature from agent: " + agentName);
+        System.out.println("DEBUG - Available readings: " + Arrays.deepToString(tempReadings));
 
         // Find the temperature reading for the given agent
         for (Object entry : tempReadingList) {
             Object[] tempReadingEntry = (Object[]) entry;
             double temp = ((Number) tempReadingEntry[0]).doubleValue();
             String agent = (String) tempReadingEntry[1];
+            System.out.println("DEBUG - Checking " + agent + " with temp " + temp);
+            
             if (agent.equals(agentName)) {
                 tempReading.set(temp);
-                System.out.println("Temperature reading for agent " + agentName + ": " + temp);
+                found = true;
+                System.out.println("DEBUG - Found temperature reading for agent " + agentName + ": " + temp);
                 break;
             }
         }
 
+        if (!found) {
+            System.out.println("DEBUG - No temperature reading found for agent " + agentName);
+            tempReading.set(0.0); // Set default value if no reading found
+        }
     }
 
 }

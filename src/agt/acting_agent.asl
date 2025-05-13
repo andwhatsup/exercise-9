@@ -48,26 +48,39 @@ robot_td("https://raw.githubusercontent.com/Interactions-HSG/example-tds/main/td
 
 /* Plan to collect ITR, ask for CR, then await CR and WR and combine */
 @select_reading_task_0_plan
-+!select_reading(TempReadings, Celsius)
++!select_reading(TempReadings)
     :  true
-    <-  .nth(0, TempReadings, Celsius);
-    	// Ask the temperature_reader agents for their references. (1 second timeout)
-      .findall([Agent, Mission], commitment(Agent,Mission,_), CommitmentList);
-      for ( .member([Agent, Mission], CommitmentList) ) {
-        if (Mission == temperature_reading_mission) {
-          // We need to perform 'askAll' here, in case there are multiple certification agents
-          .send(Agent, ask, certified_reputation(certification_agent,Agent,temperature(_),_));
-
-        }
-      };
-      .wait(1000);
-
-       // Get all ratings
-       .findall([A,T,R], interaction_trust(acting_agent,A,temperature(T),R), AllIT);
-       .findall([A,T,CR], certified_reputation(certification_agent,A,temperature(T),CR), AllCR);
-       .findall([W,A,T,WR], witness_reputation(W,A,temperature(T),WR), AllWR);
-       
-      .print("Received ", .length(ITList), " interaction trust ratings, ", .length(CRList), " certified reputation ratings, and ", .length(WRList), " witness reputation ratings.");
+    <-  .print("DEBUG - Starting select_reading plan");
+        .nth(0, TempReadings, Celsius);
+        
+        // Create list of agents with current readings
+        .findall(Agent, .member([_,Agent], TempReadings), ActiveAgents);
+        .print("DEBUG - Active agents with readings: ", ActiveAgents);
+        
+        // Ask for certified reputations
+        .findall([Agent, Mission], commitment(Agent,Mission,_), CommitmentList);
+        for ( .member([Agent, Mission], CommitmentList) ) {
+          if (Mission == temperature_reading_mission) {
+            .send(Agent, askAll, certified_reputation(_,_,_,_));
+          }
+        };
+        .wait(1000);
+        
+        .print("DEBUG - Collecting all ratings");
+        // Get all ratings (only for active agents)
+        .findall([SourceAgent, TargetAgent, MessageContent, ITRating], 
+                interaction_trust(SourceAgent, TargetAgent, MessageContent, ITRating) & 
+                .member(TargetAgent, ActiveAgents), 
+                ITList);
+        .findall([CertificationAgent, TargetAgent, MessageContent, CRRating], 
+                certified_reputation(CertificationAgent, TargetAgent, MessageContent, CRRating) & 
+                .member(TargetAgent, ActiveAgents), 
+                CRList);
+        .findall([WitnessAgent, TargetAgent, MessageContent, WRRating], 
+                witness_reputation(WitnessAgent, TargetAgent, MessageContent, WRRating) & 
+                .member(TargetAgent, ActiveAgents), 
+                WRList);
+	    .print("Received ", .length(ITList), " interaction trust ratings, ", .length(CRList), " certified reputation ratings, and ", .length(WRList), " witness reputation ratings.");
 
       // Create an artifact of type Calculator
       makeArtifact("Calculator", "tools.Calculator", [], CalculatorId);
@@ -92,8 +105,12 @@ robot_td("https://raw.githubusercontent.com/Interactions-HSG/example-tds/main/td
 @manifest_temperature_plan
 +!manifest_temperature
     : temperature(Celsius) & robot_td(Location)
-    <-  ?selectedTemp(SelectedTemp);
-        .print("I will manifest the temperature: ", Celsius);
+    <-  .findall([T,A], temperature(T)[source(A)], TempReadings);
+        !select_reading(TempReadings);
+        ?selectedTemp(SelectedTemp);
+        // Get the selected temperature of the most trustworthy agent
+        .findall(T, selectedTemp(T), SelectedTempList);
+        .nth(0, SelectedTempList, SelectedTemp);
       
 
         .print("I will manifest the temperature: ", SelectedTemp);
