@@ -2,139 +2,102 @@
 
 /* Initial beliefs and rules */
 
+// Here we store the witness ratings of the sensing agents
+// IMPORTANT: FOR TESTING PURPOSES, COMMENT OUT THE FOLLOWING BELIEF AND UNCOMMENT THE NEXT ONE
+// => TO SEE THAT IF THE SENSING AGENTS DISTRUST EACH OTHER, THE ROGUES WIN DUE TO THE WITNESS RATINGS
+all_present_agents_witness_ratings(
+  [sensing_agent_1, sensing_agent_2, sensing_agent_3, sensing_agent_4, sensing_agent_5, sensing_agent_6, sensing_agent_7, sensing_agent_8, sensing_agent_9],
+  [1, 1, 1, 1, -1, -1, -1, -1, -1]
+).
+
 // infers whether there is a mission for which goal G has to be achieved by an agent with role R
 role_goal(R,G) :- role_mission(R,_,M) & mission_goal(M,G).
 
-// infers whether there the agent has a plan that is relevant for goal G
+// infers whether the agent has a plan that is relevant for goal G
 has_plan_for(G) :- .relevant_plans({+!G},LP) & LP \== [].
 
 // infers whether there is no goal associated with role R for which the agent does not have a relevant plan
 i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
 
 /* Initial goals */
-!start. // the agent has the goal to start
+!start.
 
-/* 
- * Plan for reacting to the addition of the goal !start
- * Triggering event: addition of goal !start
- * Context: the agent believes that it can manage a group and a scheme in an organization
- * Body: greets the user
-*/
+/* Plan for reacting to the addition of the goal !start */
 @start_plan
 +!start
-    :  true
-    <-  .print("Hello world");
-    .
+    : true
+    <- .print("Hello world");
+.
 
-/* 
- * Plan for reacting to the addition of the goal !read_temperature
- * Triggering event: addition of goal !read_temperature
- * Context: true (the plan is always applicable)
- * Body: reads the temperature using a weather station artifact and broadcasts the reading
-*/
+// Plan for reacting to the addition of the belief temperature(Celsius)
+// Sending witness_reputation to the acting agent depending on which agent sent the temperature reading
+@temperature_plan
++temperature(Celsius)[source(Sender)] : true <-
+    .print("Received temperature reading from ", Sender, ": ", Celsius);
+    // Sending witness_reputation to the acting agent
+    .findall([Agents, WRRatings], all_present_agents_witness_ratings(Agents, WRRatings), WRRatingsList);
+    .nth(0, WRRatingsList, WR);
+    .nth(0, WR, Agents);
+    .nth(1, WR, WRRatings);
+    .my_name(Name);
+    for ( .range(I,0,8) ) {
+      .nth(I, Agents, Agent);
+      .nth(I, WRRatings, WRRating);
+      if (Sender == Agent & Agent \== Name) {
+        .print("Sending witness reputation to acting_agent: witness_reputation(", Name, ", ", Agent, ", temperature(", Celsius, "), ", WRRating, ")");
+        .send(acting_agent, tell, witness_reputation(Name, Agent, temperature(Celsius), WRRating));
+      };
+    }.
+
+// Plan for reacting to the addition of the goal !read_temperature
+// Now matches the Moise annotations [scheme(...), source(...)]
 @read_temperature_plan
-+!read_temperature
-    :  true
-    <-  .print("Reading the temperature");
-        readCurrentTemperature(47.42, 9.37, Celsius); // reads the current temperature using the artifact
-        .print("Read temperature (Celsius): ", Celsius);
-        .broadcast(tell, temperature(Celsius)); // broadcasts the temperature reading
++!read_temperature[scheme(_Scheme), source(_Self)]
+    : true
+    <- .print("Reading the temperature");
+       readCurrentTemperature(47.42, 9.37, Celsius);
+       .print("Read temperature (Celsius): ", Celsius);
+       .broadcast(tell, temperature(Celsius));
+.
 
-    // send witness ratings for each reader to the acting agent
-    .findall(A2, temperature(_)[source(A2)], AllReaders);
-        /* 2) for each such agent, choose WR = +1 for loyals, –1 for rogues */
-        for (.member(A2, AllReaders)) {
-            if ( A2 == rogue_leader_agent
-                 | sub_atom(A2, 0, 11, _, "rogue_agent") )
-            {
-                WR = -1;      /* punish any rogue or the leader */
-            } else {
-                WR = 1;      /* reward a loyal sensor */
-            };
-        .print("Sending witness_reputation for ", A2, ": WR=", WR);
-        .send(acting_agent, tell,
-              witness_reputation(self, A2, temperature(Celsius), WR));
-    };
-        
-    .
-
-/* 
- * Plan for reacting to the addition of the belief organization_deployed(OrgName)
- * Triggering event: addition of belief organization_deployed(OrgName)
- * Context: true (the plan is always applicable)
- * Body: joins the workspace and the organization named OrgName, and creates the goal of adopting relevant roles
-*/
+// Plan for reacting to the addition of the belief organization_deployed(OrgName)
 @organization_deployed_plan
 +organization_deployed(OrgName)
-    :  true
-    <-  .print("Notified about organization deployment of ", OrgName);
-        // joins the workspace
-        joinWorkspace(OrgName, _);
-        // looks up for, and focuses on the OrgArtifact that represents the organization
-        lookupArtifact(OrgName, OrgId);
-        focus(OrgId);
-        // creates the goal for adopting relevant roles
-        !adopt_relevant_roles;
-    .
+    : true
+    <- .print("Notified about organization deployment of ", OrgName);
+       joinWorkspace(OrgName, _);
+       lookupArtifact(OrgName, OrgId);
+       focus(OrgId);
+       !adopt_relevant_roles;
+.
 
-/* 
- * Plan for reacting to the addition of goal !adopt_relevant_roles
- * Triggering event: addition of goal !adopt_relevant_roles
- * Context: true (the plan is always applicable)
- * Body: reasons on the organization specification and adopts all relevant roles
-*/
+// Plan for adopting all relevant roles according to the organization spec
 @adopt_relevant_roles_plan
 +!adopt_relevant_roles
-    :  true
-    <-  // finds all relevant roles
-        .findall(Role, role(Role, Super) & i_have_plans_for(Role), RelevantRoles);
-        .print("Inferred that I have plans for the roles: ", RelevantRoles);
-        // adopts each role in the list RelevantRoles (could have also been implemented recursively)
-        for (.member(Role, RelevantRoles)) {
-            .print("Adopting the role of ", Role);
-            adoptRole(Role);
-        };
-    .
-
-+!kqml_received(Sender, ask, request_certified(ActingAgent, Temp), MsgId)
     : true
-    <- .print("SensingAgent: got CR request from ", Sender, " for Temp=", Temp);
-       .send(certification_agent, ask, get_certified(self, Temp)).
+    <- .findall(Role, role(Role, Super) & i_have_plans_for(Role), RelevantRoles);
+       .print("Inferred that I have plans for the roles: ", RelevantRoles);
+       for (.member(Role, RelevantRoles)) {
+         .print("Adopting the role of ", Role);
+         adoptRole(Role);
+       };
+.
 
-/* Handle certification response from certification agent */
-+certified_reputation(CertAgent, Me, temperature(Temp), CR)[source(certification_agent)]
+// Plan for printing new certified reputation ratings (from Task 3)
++certified_reputation(CertAgent, SourceAgent, MessageContent, CRRating)
     : true
-    <- .print("SensingAgent: received CR=", CR, " for Temp=", Temp, " from ", CertAgent);
-       .send(acting_agent, tell, certified_reputation(Me, Me, temperature(Temp), CR)).
+    <- .print("Certified Reputation Rating: (", CertAgent, ", ", SourceAgent, ", ", MessageContent, ", ", CRRating, ")");
+.
 
-
-/* 
- * 1) When someone does `.send(Me, ask, request_certified(self,Temp))`,
- *    Jason will turn that into the goal +!request_certified(self,Temp).
- *    Here we forward that request on to the certification_agent.
- */
-@request_certified_plan
-+!request_certified(ActAgent, Temp)
-    :  true
-    <-  .print("SensingAgent: got CR request from ", ActAgent, " for Temp=", Temp);
-        .send(certification_agent, ask,  
-              get_certified(self, Temp));  
-        // now wait for the certification_agent to reply
-    .
-
-/* 
- * 2) When the certification_agent replies with certified_reputation(...),
- *    forward it back to the original acting agent.
- */
-+certified_reputation(CertAgent, Me, temperature(Temp), CR)
-    :  true
-    <-  .print("SensingAgent: received CR=", CR, 
-               " for Temp=", Temp, " from ", CertAgent);
-        .send(ActAgent, tell,  
-              certified_reputation(Me, temperature(Temp), CR));
-    .
-
-
+// Add plan to handle CR requests
+@kqml_received_ask_plan[atomic]
++!kqml_received(Sender, ask, certified_reputation(CertAgent,Agent,Content,Rating), _)
+    : true 
+    <- // Forward the request to certification agent
+       .send(certification_agent, askOne, certified_reputation(CertAgent,Agent,Content,Rating), Response);
+       if (Response \== no) {
+           .send(Sender, tell, Response);
+       }.
 /* Import behavior of agents that work in CArtAgO environments */
 { include("$jacamoJar/templates/common-cartago.asl") }
 
@@ -144,6 +107,5 @@ i_have_plans_for(R) :- not (role_goal(R,G) & not has_plan_for(G)).
 /* Import behavior of agents that reason on MOISE organizations */
 { include("$moiseJar/asl/org-rules.asl") }
 
-/* Import behavior of agents that react to organizational events
-(if observing, i.e. being focused on the appropriate organization artifacts) */
+/* Import behavior of agents that react to organizational events */
 { include("inc/skills.asl") }

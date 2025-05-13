@@ -1,52 +1,20 @@
 // rogue agent is a type of sensing agent
 /* Initial beliefs and rules */
 // initially, the agent believes that it hasn't received any temperature readings
-received_readings([]).
-
-/* Override: only forward the leader's exact reading */
-@rogue_read_temperature_plan[atomic]
-+!read_temperature
-    : true
-    <-  //  1. Log that we're looking for the leader's reading
-        .print("Rogue agent: fetching leader's temperature");
-        
-        // 2. Collect all temperature values sent by rogue_leader_agent
-        .findall(Val,
-                 temperature(Val)[source(rogue_leader_agent)],
-                 LeaderTemps);
-        
-        //  3. If we have at least one reading, rebroadcast the first;
-       //     otherwise wait and retry.
-    if (LeaderTemps \== []) {
-        .nth(0, LeaderTemps, ChosenTemp);
-        .print("Found leader's temperature: ", ChosenTemp);
-        .print("Rebroadcasting leader's temperature: ", ChosenTemp);
-        .broadcast(tell, temperature(ChosenTemp));
-        
-        // send witness ratings for each reader to the acting agent
-        /* after rebroadcasting, send WR = +1 to leader, –1 to all others */
-        .findall(A2, temperature(_)[source(A2)], AllReaders);
-        for (.member(A2, AllReaders)) {
-            if ( A2 == rogue_leader_agent ) {
-                WR = 1;     // reward the leader
-            } else {
-                WR = -1;    // punish everyone else
-            };
-            .print("Rogue_agent sending WR for ", A2, ": WR=", WR);
-            .send( acting_agent, tell,
-                   witness_reputation(self, A2, temperature(ChosenTemp), WR) );
-        }
-    } else {
-            .print("No leader reading yet, waiting 1s");
-            .wait(1000);
-            !read_temperature
-        };
-    .
-
+all_present_agents_witness_ratings(
+  [sensing_agent_1, sensing_agent_2, sensing_agent_3, sensing_agent_4, sensing_agent_5, sensing_agent_6, sensing_agent_7, sensing_agent_8, sensing_agent_9],
+  [-1, -1, -1, -1, 1, 1, 1, 1, 1]
+).
 
 /* Initial goals */
 !set_up_plans. // the agent has the goal to add pro-rogue plans
 
+
+// Task 2 Collusion fix:
++temperature(Celsius)[source(rogue_leader_agent)] : true <-
+    .print("Colluding: broadcasting Rogue Leader's reading: ", Celsius);
+    .broadcast(tell, temperature(Celsius));
+    .
 /* 
  * Plan for reacting to the addition of the goal !set_up_plans
  * Triggering event: addition of goal !set_up_plans
@@ -64,21 +32,24 @@ received_readings([]).
         // adds a new plan for reading the temperature that doesn't require contacting the weather station
         // the agent will pick one of the first three temperature readings that have been broadcasted,
         // it will slightly change the reading, and broadcast it
-        .add_plan({ +!read_temperature
-            :  received_readings(TempReadings) &
-               .length(TempReadings) >=3
-            <-  .print("Reading the temperature");
-                //picks one of the 3 first received readings randomly
-                .random([0,1,2], SourceIndex);
-                .reverse(TempReadings, TempReadingsReversed);
-                .print("Received temperature readings: ", TempReadingsReversed);
-                .nth(SourceIndex, TempReadingsReversed, Celsius);
-                // adds a small deviation to the selected temperature reading
-                .random(Deviation);
-                // broadcasts the temperature
-                .print("Read temperature (Celsius): ", Celsius + Deviation);
-                .broadcast(tell, temperature(Celsius + Deviation));
-            });
+        .add_plan({ +temperature(Celsius)[source(Sender)] : true <-
+            .print("Received temperature reading from ", Sender, ": ", Celsius);
+            // Sending witness_reputation to the acting agent
+            .findall([Agents, WRRatings], all_present_agents_witness_ratings(Agents, WRRatings), WRRatingsList);
+            .nth(0, WRRatingsList, WR);
+            .nth(0, WR, Agents);
+            .nth(1, WR, WRRatings);
+            .my_name(Name);
+            for ( .range(I,0,8) ) {
+            .nth(I, Agents, Agent);
+            .nth(I, WRRatings, WRRating);
+            if (Sender == Agent & Agent \== Name) {
+                .print("Sending witness reputation to acting_agent: witness_reputation(", Name, ", ", Agent, ", temperature(", Celsius, "), ", WRRating, ")");
+                .send(acting_agent, tell, witness_reputation(Name, Agent, temperature(Celsius), WRRating));
+            };
+            };
+        });
+
 
         // adds plan for reading temperature in case fewer than 3 readings have been received
         .add_plan({ +!read_temperature
@@ -93,6 +64,13 @@ received_readings([]).
                 !read_temperature;
             });
     .
-
+/*— Task 3: reply when someone “ask”s for my certified_reputation —*/
+@reply_certified_reputation
++!kqml_received(Sender, ask, certified_reputation(CertAgent,Self,temperature(C),CR), Mid)
+    :  Self == .my_name(Self) 
+       & certified_reputation(CertAgent,Self,temperature(C),CR)
+    <- .print("Replying to CR-ask from ", Sender, ": rating=", CR);
+       .send(Sender, tell, certified_reputation(CertAgent,Self,temperature(C),CR));
+.
 /* Import behavior of sensing agent */
 { include("sensing_agent.asl")}

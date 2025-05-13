@@ -1,4 +1,4 @@
-// certification agent - handles reputation certification requests
+// acting agent
 
 /* Initial beliefs and rules */
 // initial beliefs about certified reputation ratings for sensing agents
@@ -17,27 +17,30 @@ certified_reputation(certification_agent, sensing_agent_8, temperature(8), -0.5)
 certified_reputation(certification_agent, sensing_agent_9, temperature(-2), -0.9).
 
 /* Initial goals */
-!start.
+!start. // the agent has the goal to start
 
+/* 
+ * Plan for reacting to the addition of the goal !start
+ * Triggering event: addition of goal !start
+ * Context: the agent believes that it can manage a group and a scheme in an organization
+ * Body: greets the user
+*/
 @start_plan
 +!start
-    : true
-    <- .print("Certification agent started");
+    :  true
+    <-  .print("Hello world");
     .
 
-/* Plan for handling get_certified requests from sensing agents */
-@handle_get_certification_request
-+!kqml_received(Sender, ask, get_certified(Agent, Temp), MId)
-    : certified_reputation(certification_agent, Sender, temperature(_), CR)
-    <- .print("Processing get_certified request from ", Sender, " for temp=", Temp);
-       .send(Sender, tell, certified_reputation(certification_agent, Sender, temperature(Temp), CR));
-       .print("Sent certification to ", Sender, " with rating ", CR).
+/* 
+ * Plan for reacting to the addition of the belief certified_reputation(CertificationAgent, InteractingAgent, MessageContent, CRRating)
+ * Triggering event: addition of the belief certified_reputation(CertificationAgent, InteractingAgent, MessageContent, CRRating)
+ * Context: the agent believes that it is the CertificationAgent that created the certified reputation rating
+ * Body: sends the certified reputation rating to the associated InteractingAgent
+*/
++certified_reputation(CertificationAgent, InteractingAgent, MessageContent, CRRating)
+    :  .my_name(CertificationAgent)
+    <-  .send(InteractingAgent, tell, certified_reputation(CertificationAgent, InteractingAgent, MessageContent, CRRating));
+    .
 
-/* Plan for handling unknown agents */
-@handle_missing_get_certification
-+!kqml_received(Sender, ask, get_certified(Agent, Temp), MId)
-    : not certified_reputation(certification_agent, Sender, temperature(_), _)
-    <- .print("No certification found for agent ", Sender);
-       .send(Sender, tell, certified_reputation(certification_agent, Sender, temperature(Temp), -1.0)).
 
 { include("$jacamoJar/templates/common-cartago.asl") }
